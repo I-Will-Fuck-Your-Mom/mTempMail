@@ -1,0 +1,6 @@
+{
+  "name": "mTempMail - Free Disposable Temporary Email",
+  "description": "Fast, private, and secure disposable temporary email generator powered by mtempmail API. Features dark mode, instant auto-refresh, QR code sharing, OTP detection, and custom domain selection.",
+  "requestFramePermissions": ["clipboard-read", "clipboard-write"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
