@@ -183,6 +183,49 @@ export async function getEmailMessages(
 }
 
 /**
+ * Convert HTML or entity-encoded text into clean, readable plain text
+ */
+export function convertHtmlToPlainText(input: string): string {
+  if (!input || typeof input !== 'string') return '';
+
+  let text = input;
+
+  // 1. Remove style, script, head tags and their contents
+  text = text.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '');
+  text = text.replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '');
+  text = text.replace(/<head[^>]*>[\s\S]*?<\/head>/gi, '');
+
+  // 2. Replace line-breaking elements with clean newlines
+  text = text.replace(/<br\s*\/?>/gi, '\n');
+  text = text.replace(/<\/(p|div|tr|h[1-6])>/gi, '\n');
+  text = text.replace(/<li[^>]*>/gi, ' • ');
+  text = text.replace(/<\/li>/gi, '\n');
+
+  // 3. Remove all other HTML tags
+  text = text.replace(/<[^>]+>/g, '');
+
+  // 4. Decode HTML entities
+  text = text
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&#39;/g, "'")
+    .replace(/&apos;/g, "'")
+    .replace(/&quot;/g, '"')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&#(\d+);/g, (_, dec) => String.fromCharCode(Number(dec)))
+    .replace(/&#x([0-9a-f]+);/gi, (_, hex) => String.fromCharCode(parseInt(hex, 16)));
+
+  // 5. Clean up duplicate blank lines and trailing spaces
+  return text
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line, i, arr) => line.length > 0 || (i > 0 && arr[i - 1]?.length > 0))
+    .join('\n')
+    .trim();
+}
+
+/**
  * Standardize message fields from various potential API shapes
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -190,8 +233,26 @@ function normalizeMessage(raw: any): EmailMessage {
   const fromStr = raw.from || raw.sender || raw.from_email || 'Unknown Sender';
   const fromEmail = raw.from_email || (fromStr.includes('<') ? fromStr.replace(/.*<([^>]+)>.*/, '$1') : fromStr);
   const subjectStr = raw.subject || '(No Subject)';
-  const bodyText = raw.body_text || raw.text || raw.content || raw.message || '';
-  const bodyHtml = raw.body_html || raw.html || raw.message || raw.body_text || '';
+
+  // Find genuine HTML string (mtempmail API often sets raw.body_html to boolean true,
+  // with actual HTML inside raw.content or raw.body_text)
+  const candidateHtml = [
+    typeof raw.body_html === 'string' && raw.body_html.trim() ? raw.body_html : null,
+    typeof raw.content === 'string' && raw.content.trim() ? raw.content : null,
+    typeof raw.body_text === 'string' && /<[a-z][\s\S]*>/i.test(raw.body_text) ? raw.body_text : null,
+    typeof raw.html === 'string' && raw.html.trim() ? raw.html : null,
+    typeof raw.message === 'string' && raw.message.trim() ? raw.message : null,
+  ].find((c) => Boolean(c)) || '';
+
+  // Find text candidate
+  const candidateText = [
+    typeof raw.text === 'string' ? raw.text : null,
+    typeof raw.body_text === 'string' ? raw.body_text : null,
+    typeof raw.content === 'string' ? raw.content : null,
+    typeof raw.message === 'string' ? raw.message : null,
+  ].find((c) => Boolean(c)) || '';
+
+  const cleanText = convertHtmlToPlainText(candidateText || candidateHtml);
 
   return {
     id: raw.id || `${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
@@ -200,10 +261,10 @@ function normalizeMessage(raw: any): EmailMessage {
     subject: subjectStr,
     date: raw.date || raw.time || raw.created_at || new Date().toISOString(),
     time: raw.time || raw.date,
-    body_text: bodyText,
-    body_html: bodyHtml,
-    message: raw.message,
-    content: raw.content,
+    body_text: cleanText,
+    body_html: candidateHtml,
+    message: typeof raw.message === 'string' ? raw.message : cleanText,
+    content: typeof raw.content === 'string' ? raw.content : candidateHtml,
     is_seen: Boolean(raw.is_seen),
     attachments: Array.isArray(raw.attachments) ? raw.attachments : [],
     receivedAt: raw.receivedAt || Date.now(),
